@@ -9,8 +9,10 @@ import torch.nn.functional as F
 import copy, time
 from pathlib import Path
 
+
 def to_numpy(tensor):
     return tensor.cpu().numpy().flatten()
+
 
 class DDPGExtension(DDPGAgent):
     pass
