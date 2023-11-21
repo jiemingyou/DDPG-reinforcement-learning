@@ -1,8 +1,8 @@
 import torch.nn.functional as F
-from torch import nn
-from collections import namedtuple
 import numpy as np
 import torch
+from torch import nn
+from collections import namedtuple
 
 # from torch.distributions import Categorical
 from torch.distributions import Normal, Independent
@@ -19,9 +19,27 @@ Batch = namedtuple(
 )
 
 
+def soft_update_params(m, m_target, tau):
+    """
+    Update slow-moving average of online network (target network) at rate tau.
+    """
+    with torch.no_grad():
+        for p, p_target in zip(m.parameters(), m_target.parameters()):
+            p_target.data.lerp_(p.data, tau)
+
+
 # Actor-critic agent
 class Policy(nn.Module):
-    """Actor network"""
+    """
+    Actor network representing the policy for an actor-critic agent.
+
+    Architecture:
+    The actor network consists of a sequence of fully connected layers with ReLU activation.
+    The output is scaled using the hyperbolic tangent (tanh) function
+    to ensure it lies within the specified bounds.
+    Given a state, it computes the actor's action.
+
+    """
 
     def __init__(self, state_dim, action_dim, max_action):
         super().__init__()
@@ -39,6 +57,15 @@ class Policy(nn.Module):
 
 
 class Critic(nn.Module):
+    """
+    Critic network
+
+    Architecture:
+    The critic network consists of a sequence of fully connected layers with ReLU activation.
+    The input to the network is the concatenation of the state and action.
+    The output is the value of the state-action pair.
+    """
+
     def __init__(self, state_dim, action_dim):
         super().__init__()
         self.value = nn.Sequential(
@@ -55,17 +82,25 @@ class Critic(nn.Module):
 
 
 class ReplayBuffer(object):
-    def __init__(self, state_shape: tuple, action_dim: int, max_size=int(1e6)):
+    """
+    Replay buffer for storing past S, A, R, S', D transitions
+    """
+
+    def __init__(self, observation_dim: int, action_dim: int, max_size=int(1e6)):
+        # Convert max_size to int
+        if isinstance(max_size, str):
+            max_size = int(float(max_size))
+
         self.max_size = max_size
         self.ptr = 0
         self.size = 0
-
         dtype = torch.float32
-        self.state = torch.zeros((max_size, *state_shape), dtype=dtype)
-        self.action = torch.zeros((max_size, action_dim), dtype=dtype)
-        self.next_state = torch.zeros((max_size, *state_shape), dtype=dtype)
-        self.reward = torch.zeros((max_size, 1), dtype=dtype)
-        self.not_done = torch.zeros((max_size, 1), dtype=dtype)
+
+        self.state = torch.zeros(size=(max_size, observation_dim), dtype=dtype)
+        self.action = torch.zeros(size=(max_size, action_dim), dtype=dtype)
+        self.next_state = torch.zeros(size=(max_size, observation_dim), dtype=dtype)
+        self.reward = torch.zeros(size=(max_size, 1), dtype=dtype)
+        self.not_done = torch.zeros(size=(max_size, 1), dtype=dtype)
         self.extra = {}
 
     def _to_tensor(self, data, dtype=torch.float32):
@@ -126,3 +161,35 @@ class ReplayBuffer(object):
             extra=extra,
         )
         return batch
+
+
+class Logger(object):
+    """
+    Logger class to log information during training
+    """
+
+    def __init__(self):
+        self.metrics = defaultdict(list)
+
+    def log(self, **kwargs):
+        for key, value in kwargs.items():
+            self.metrics[key].append(value)
+
+    def save(self, path, seed=None):
+        df = pd.DataFrame.from_dict(self.metrics)
+        print("logger and seed", seed)
+        if seed is None:
+            df.to_csv(f"{path}.csv")
+        else:
+            fname = f"{path}" + "_" + str(seed) + ".csv"
+            print(fname)
+            df.to_csv(fname)
+
+
+if __name__ == "__main__":
+    z = torch.zeros(size=(6, 2), dtype=torch.float32)
+    print(z)
+
+    # rb = ReplayBuffer(observation_dim=2, action_dim=6)
+    # print(rb.state_shape)
+    # print("Success!")
