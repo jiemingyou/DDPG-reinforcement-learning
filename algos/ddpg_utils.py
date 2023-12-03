@@ -80,26 +80,24 @@ class Critic(nn.Module):
         return self.value(x)  # output shape [batch, 1]
 
 
-class DistributionalCritic(nn.Module):
-    def __init__(self, state_dim, action_dim, num_atoms, v_min, v_max):
+class RNDNetwork(nn.Module):
+    """
+    Random Network Distillation (RND) network for
+    calculating the extrincic exploration bonus.
+    """
+
+    def __init__(self, input_dim, output_dim):
         super().__init__()
-        self.num_atoms = num_atoms
-        self.v_min = v_min
-        self.v_max = v_max
-        self.atoms = torch.linspace(v_min, v_max, steps=num_atoms)
-        self.value = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 32),
+        self.predictor = nn.Sequential(
+            nn.Linear(input_dim, 32),
             nn.ReLU(),
             nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(32, num_atoms),
+            nn.Linear(32, output_dim),
         )
 
-    def forward(self, state, action):
-        x = torch.cat([state, action], 1)
-        logits = self.value(x)
-        probabilities = F.softmax(logits, dim=-1)
-        return probabilities
+    def forward(self, state):
+        return self.predictor(state)
 
 
 class ReplayBuffer(object):
