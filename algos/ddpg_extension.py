@@ -1,3 +1,9 @@
+import utils.common_utils as cu
+import torch
+import numpy as np
+import torch.nn.functional as F
+import copy, time
+
 from .agent_base import BaseAgent
 from .ddpg_utils import (
     Policy,
@@ -8,12 +14,6 @@ from .ddpg_utils import (
     Logger,
 )
 from .ddpg_agent import DDPGAgent
-
-import utils.common_utils as cu
-import torch
-import numpy as np
-import torch.nn.functional as F
-import copy, time
 from pathlib import Path
 from torch.distributions import MultivariateNormal
 
@@ -34,8 +34,6 @@ class DDPGExtension(DDPGAgent):
 
     def __init__(self, config=None):
         super(DDPGAgent, self).__init__(config)
-
-        # ""cuda" if torch.cuda.is_available() else "cpu"
         self.device = self.cfg.device
         self.name = "ddpg"
 
@@ -62,8 +60,6 @@ class DDPGExtension(DDPGAgent):
             self.state_dim, self.action_dim, max_size=self.buffer_size
         )
 
-        # Initizlize policy and critic
-
         # Actor
         self.pi = Policy(self.state_dim, self.action_dim, self.max_action).to(
             self.device
@@ -76,7 +72,7 @@ class DDPGExtension(DDPGAgent):
         self.q_target = copy.deepcopy(self.q)
         self.q_optim = torch.optim.Adam(self.q.parameters(), lr=self.lr)
 
-        ######### HERE BEGINS THE TD3 IMPLEMENTATION #########
+        ######### TD3 #########
 
         # Twin-critic
         self.q2 = Critic(self.state_dim, self.action_dim).to(self.device)
@@ -88,42 +84,49 @@ class DDPGExtension(DDPGAgent):
         self.noise_clip = 0.5
         self.policy_freq = 2
 
-        ######### HERE BEGINS THE RND IMPLEMENTATION #########
-
+        ######### RANDOM NETWORK DISTILLATION #########
+        """
         # Initialize running mean and standard deviation for intrinsic rewards
-        # self.alpha = 0.01  # TODO: Try 0.2
-        # self.intrinsic_reward_mean = 0
-        # self.intrinsic_reward_std = 1
+        self.alpha = 0.01
+        self.intrinsic_reward_mean = 0
+        self.intrinsic_reward_std = 1
 
         # Initialize the RND target and predictor networks
-        # self.rnd_target_dim = 2
-        # self.rnd_target = RNDNetwork(self.state_dim, self.rnd_target_dim).to(
-        #    self.device
-        # )
-        # self.rnd_predictor = RNDNetwork(self.state_dim, self.rnd_target_dim).to(
-        #    self.device
-        # )
-        # self.rnd_predictor_optim = torch.optim.Adam(
-        #    self.rnd_predictor.parameters(), lr=self.lr
-        # )
+        self.rnd_target_dim = 2
+        self.rnd_target = RNDNetwork(self.state_dim, self.rnd_target_dim).to(
+           self.device
+        )
+        self.rnd_predictor = RNDNetwork(self.state_dim, self.rnd_target_dim).to(
+           self.device
+        )
+        self.rnd_predictor_optim = torch.optim.Adam(
+           self.rnd_predictor.parameters(), lr=self.lr
+        )
+        """
 
-        ######### HERE BEGINS THE OVSERVAATION NORMALIZATION ########
-
+        ######### OBSERVATION NORMALIZATION ########
+        """
         # Observation normalization parameters
-        # self.observation_mean = 0
-        # self.observation_std = 52  # 1
+        self.alpha = 0.01
+        self.observation_mean = 0
+        self.observation_std = 52
+        """
 
     def get_intrinsic_reward(self, observation):
+        """
+        Calculate the RND loss
+        """
         # Get RND target and predictor
         rnd_target = self.rnd_target(observation)
         rnd_predictor = self.rnd_predictor(observation)
-
-        # Calculate the RND loss = intrinsic reward
         rnd_loss = F.mse_loss(rnd_target, rnd_predictor, reduction="none").mean(dim=1)
 
         return rnd_loss
 
     def get_normalized_intrinsic_reward(self, intrinsic_reward):
+        """
+        Normalize the intrinsic reward using running mean and std
+        """
         # Update mean
         self.intrinsic_reward_mean = (
             1 - self.alpha
@@ -137,22 +140,27 @@ class DDPGExtension(DDPGAgent):
 
         # Normalize the intrinsic reward
         intrinsic_reward -= self.intrinsic_reward_mean
-        # intrinsic_reward /= self.intrinsic_reward_std + 1e-8
 
         # Clip the reward between 0, 0.3
-        intrinsic_reward = np.clip(intrinsic_reward, 0, 0.3)  # TODO: CHECK
+        intrinsic_reward = np.clip(intrinsic_reward, 0, 0.3)
 
         return intrinsic_reward.unsqueeze(1)
 
     def get_normalized_observation(self, observation):
-        # observation = (observation - self.observation_mean) / (self.observation_std)
+        """
+        Normalize the observation using mean and std
+        """
         observation -= self.observation_mean
         observation /= self.observation_std
 
         return observation
 
-    # Rewards shaping: penalize close distance to sanding
     def compute_reward(self, state):
+        """
+        Compute proximity based rewards.
+        Reward for being close to sanding areas and
+        penalize for being close to no-sanding areas.
+        """
         n_spots = (self.state_dim - 2) // 2
         robot_x, robot_y = state[0:2]
         sanding_areas = state[2 : (2 + n_spots)]
@@ -173,7 +181,6 @@ class DDPGExtension(DDPGAgent):
         return reward
 
     def _update(self):
-        # get batch data
         batch = self.buffer.sample(self.batch_size, device=self.device)
 
         # Get batch S, A, R, S', D values
@@ -183,28 +190,35 @@ class DDPGExtension(DDPGAgent):
         reward = batch.reward
         not_done = batch.not_done
 
-        # Normalize observations
-        # next_state = self.get_normalized_observation(next_state)
+        ### OBSERVATION NORMALIZATION
+        """
+        next_state = self.get_normalized_observation(next_state)
+        """
 
+        ### RND INTRINSIC REWARD
+        """
         # Compute RND loss
-        # rnd_loss = self.get_intrinsic_reward(next_state)
+        rnd_loss = self.get_intrinsic_reward(next_state)
 
         # Compute intrinsic reward
-        # intrinsic_reward = rnd_loss.detach()
-        # intrinsic_reward = self.get_normalized_intrinsic_reward(intrinsic_reward)
+        intrinsic_reward = rnd_loss.detach()
+        intrinsic_reward = self.get_normalized_intrinsic_reward(intrinsic_reward)
 
-        # reward += intrinsic_reward
+        reward += intrinsic_reward
 
         # Optimize the RND predictor every 10 steps
-        # if self.buffer_ptr % 10 == 0:
-        #    self.rnd_predictor_optim.zero_grad()
-        #    rnd_loss.mean().backward()
-        #    self.rnd_predictor_optim.step()
+        if self.buffer_ptr % 10 == 0:
+           self.rnd_predictor_optim.zero_grad()
+           rnd_loss.mean().backward()
+           self.rnd_predictor_optim.step()
+        """
 
-        # Reward shaping
-        # next_state_np = next_state.detach().numpy()
-        # reward_shaping = np.array([self.compute_reward(s) for s in next_state_np])
-        # reward = torch.tensor(reward_shaping, dtype=torch.float).reshape(-1, 1)
+        ### REWARD SHAPING
+        """
+        next_state_np = next_state.detach().numpy()
+        reward_shaping = np.array([self.compute_reward(s) for s in next_state_np])
+        reward = torch.tensor(reward_shaping, dtype=torch.float).reshape(-1, 1)
+        """
 
         # Computing the target Q-value
         with torch.no_grad():

@@ -22,7 +22,6 @@ class DDPGAgent(BaseAgent):
 
     def __init__(self, config=None):
         super(DDPGAgent, self).__init__(config)
-        # ""cuda" if torch.cuda.is_available() else "cpu"
         self.device = self.cfg.device
         self.name = "ddpg"
 
@@ -48,8 +47,6 @@ class DDPGAgent(BaseAgent):
         self.buffer = ReplayBuffer(
             self.state_dim, self.action_dim, max_size=self.buffer_size
         )
-
-        # Initizlize policy and critic
 
         # Actor
         self.pi = Policy(self.state_dim, self.action_dim, self.max_action).to(
@@ -83,7 +80,6 @@ class DDPGAgent(BaseAgent):
         return info
 
     def _update(self):
-        # get batch data
         batch = self.buffer.sample(self.batch_size, device=self.device)
 
         # Get batch S, A, R, S', D values
@@ -102,13 +98,13 @@ class DDPGAgent(BaseAgent):
         # y(r, s', d) = r + gamma * Q_target(s', mu_target(s')) * (1 - d)
         q_target = reward + self.gamma * q_tar * not_done
 
-        # compute current Q(s, a)
+        # Compute current Q(s, a)
         q = self.q(state, action)
 
-        # compute critic loss between Q(s, a) and y(r, s', d)
+        # Compute critic loss between Q(s, a) and y(r, s', d)
         critic_loss = F.mse_loss(q, q_target)
 
-        # optimize the critic
+        # Optimize the critic
         self.q_optim.zero_grad()
         critic_loss.backward()
         self.q_optim.step()
@@ -116,15 +112,15 @@ class DDPGAgent(BaseAgent):
         # Compute mu(s)
         mu = self.pi(state)
 
-        # compute actor loss Q(s, mu(s))
+        # Compute actor loss Q(s, mu(s))
         actor_loss = -self.q(state, mu).mean()
 
-        # optimize the actor
+        # Optimize the actor
         self.pi_optim.zero_grad()
         actor_loss.backward()
         self.pi_optim.step()
 
-        # update the target q and target pi using u.soft_update_params() function
+        # Update the target q and target pi using u.soft_update_params() function
         soft_update_params(self.q, self.q_target, self.tau)
         soft_update_params(self.pi, self.pi_target, self.tau)
 
@@ -136,22 +132,22 @@ class DDPGAgent(BaseAgent):
         Return action for given state as per current policy.
         If evaluation is True, use the greedy action.
         """
-
+        # Add the batch dimension
         if observation.ndim == 1:
-            observation = observation[None]  # add the batch dimension
+            observation = observation[None]
 
-        # convert the observation to torch tensor
+        # Convert the observation to torch tensor
         x = torch.from_numpy(observation).float().to(self.device)
 
-        # the stddev of the expl_noise if not evaluation
+        # The stddev of the expl_noise if not evaluation
         expl_noise = 0.05 * self.max_action
 
-        # get the action
+        # Get the action
         with torch.no_grad():
             action = self.pi(x).squeeze(0)
 
         if not evaluation:
-            # collect random trajectories for better exploration.
+            # Collect random trajectories for better exploration.
             if self.buffer_ptr < self.random_transition:
                 # Random actions of shape (action_dim,)
                 action = torch.FloatTensor(self.action_dim).uniform_(-1, 1)
@@ -217,7 +213,6 @@ class DDPGAgent(BaseAgent):
 
     def train(self):
         """Main function to call for training"""
-        # create a simple logger to record stats
         if self.cfg.save_logging:
             L = Logger()
 
@@ -227,14 +222,14 @@ class DDPGAgent(BaseAgent):
         log_count = 0
 
         for ep in range(self.cfg.train_episodes + 1):
-            # collect data and update the policy
+            # Collect data and update the policy
             train_info = self.train_iteration()
             train_info.update({"episodes": ep})
             total_step += train_info["episode_length"]
             train_info.update({"total_step": total_step})
             run_episode_reward.append(train_info["ep_reward"])
 
-            # log the training information
+            # Log the training information
             if total_step > self.cfg.log_interval * log_count:
                 average_return = sum(run_episode_reward) / len(run_episode_reward)
                 if not self.cfg.silent:
@@ -247,7 +242,7 @@ class DDPGAgent(BaseAgent):
                 run_episode_reward = []
                 log_count += 1
 
-        # save the model weights
+        # Save the model weights
         if self.cfg.save_model:
             self.save_model()
 
@@ -269,7 +264,7 @@ class DDPGAgent(BaseAgent):
         self.buffer.add(state, action, next_state, reward, done)
 
     def load_model(self):
-        # define the save path, do not modify
+        # Define the save path, do not modify
         filepath = str(self.model_dir) + "/model_parameters_" + str(self.seed) + ".pt"
 
         d = torch.load(filepath)
@@ -279,7 +274,7 @@ class DDPGAgent(BaseAgent):
         self.pi_target.load_state_dict(d["pi_target"])
 
     def save_model(self):
-        # define the save path, do not modify
+        # Define the save path, do not modify
         filepath = str(self.model_dir) + "/model_parameters_" + str(self.seed) + ".pt"
 
         torch.save(
